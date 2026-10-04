@@ -640,6 +640,13 @@ uint16_t BatteryMonitor::readMillivolts() const {
     delay(5);
     mv = analogReadMilliVolts(_adcPin);
     digitalWrite(ce, activeHigh ? HIGH : LOW);  // resume charging
+  } else if (const int8_t en = BoardConfig::ACTIVE.batteryAdcEnable; en >= 0) {
+    // The divider is unpowered between reads; let its 10 nF tap settle.
+    pinMode(en, OUTPUT);
+    digitalWrite(en, HIGH);
+    delay(10);
+    mv = analogReadMilliVolts(_adcPin);
+    digitalWrite(en, LOW);
   } else {
     mv = analogReadMilliVolts(_adcPin);
   }

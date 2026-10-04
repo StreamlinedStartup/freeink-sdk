@@ -78,6 +78,9 @@
 #ifndef FREEINK_DEVICE_WS397
 #define FREEINK_DEVICE_WS397 0
 #endif
+#ifndef FREEINK_DEVICE_RETERMINAL_E1001
+#define FREEINK_DEVICE_RETERMINAL_E1001 0
+#endif
 
 #ifndef FREEINK_DEVICE_METALIO_EINK4
 #define FREEINK_DEVICE_METALIO_EINK4 0
@@ -90,9 +93,10 @@
 #if !(FREEINK_DEVICE_X4 || FREEINK_DEVICE_X3 || FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_M5 || \
       FREEINK_DEVICE_MURPHY || FREEINK_DEVICE_DELINK || FREEINK_DEVICE_LILYGO || FREEINK_DEVICE_M5PAPER ||               \
       FREEINK_DEVICE_STICKY || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_PAPERS3 || FREEINK_DEVICE_MURPHY_M4 ||         \
-      FREEINK_DEVICE_EEGO_A4 || FREEINK_DEVICE_ONEPAGE || FREEINK_DEVICE_WS397 || FREEINK_DEVICE_METALIO_EINK4)
+      FREEINK_DEVICE_EEGO_A4 || FREEINK_DEVICE_ONEPAGE || FREEINK_DEVICE_WS397 || FREEINK_DEVICE_METALIO_EINK4 || \
+      FREEINK_DEVICE_RETERMINAL_E1001)
 #error \
-    "FreeInk: no device selected. Pass at least one -DFREEINK_DEVICE_<NAME> (X4, X3, X4PRO, X4CLASSIC, M5, MURPHY, DELINK, LILYGO, M5PAPER, STICKY, PAPERMONO, PAPERS3, MURPHY_M4, EEGO_A4, ONEPAGE, WS397, METALIO_EINK4) in your build env — see platformio.sample.ini."
+    "FreeInk: no device selected. Pass at least one -DFREEINK_DEVICE_<NAME> (X4, X3, X4PRO, X4CLASSIC, M5, MURPHY, DELINK, LILYGO, M5PAPER, STICKY, PAPERMONO, PAPERS3, MURPHY_M4, EEGO_A4, ONEPAGE, WS397, METALIO_EINK4, RETERMINAL_E1001) in your build env — see platformio.sample.ini."
 #endif
 // Each device belongs to one MCU family; a binary targets exactly one. X3/X4 are
 // ESP32-C3; M5 PaperColor/Murphy/de-link/LilyGo are ESP32-S3; M5Paper v1.1 is the
@@ -103,7 +107,8 @@
 #define FREEINK_MCU_S3                                                                                    \
   (FREEINK_DEVICE_M5 || FREEINK_DEVICE_MURPHY || FREEINK_DEVICE_DELINK || FREEINK_DEVICE_LILYGO ||        \
    FREEINK_DEVICE_STICKY || FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO ||  \
-   FREEINK_DEVICE_PAPERS3 || FREEINK_DEVICE_MURPHY_M4 || FREEINK_DEVICE_EEGO_A4 || FREEINK_DEVICE_WS397 || FREEINK_DEVICE_METALIO_EINK4)
+   FREEINK_DEVICE_PAPERS3 || FREEINK_DEVICE_MURPHY_M4 || FREEINK_DEVICE_EEGO_A4 || FREEINK_DEVICE_WS397 || FREEINK_DEVICE_METALIO_EINK4 || \
+   FREEINK_DEVICE_RETERMINAL_E1001)
 #define FREEINK_MCU_ESP32 (FREEINK_DEVICE_M5PAPER)
 #if (FREEINK_MCU_C3 + FREEINK_MCU_C61 + FREEINK_MCU_S3 + FREEINK_MCU_ESP32) != 1
 #error \
@@ -146,11 +151,14 @@
 #else
 #define FREEINK_DRIVER_UC8279 0
 #endif
-#if FREEINK_DEVICE_X4 || FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC
+#if FREEINK_DEVICE_X4 || FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_RETERMINAL_E1001
 #define FREEINK_DRIVER_UC8179 1
-#define FREEINK_DRIVER_UC8279_X4 1
 #else
 #define FREEINK_DRIVER_UC8179 0
+#endif
+#if FREEINK_DEVICE_X4 || FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC
+#define FREEINK_DRIVER_UC8279_X4 1
+#else
 #define FREEINK_DRIVER_UC8279_X4 0
 #endif
 // M5 PaperColor has two interchangeable display backends: the fast hand-rolled
@@ -412,6 +420,7 @@ enum class Board : uint8_t {
   OnePage,    // OnePage: ESP32-C61, SSD1677 800x480 SPI panel, 4-key ADC ladder + 3 side keys
   WsEpaper397,  // Waveshare ESP32-S3-ePaper-3.97: SSD1677 800x480, 3 keys + BOOT, AXP2101 PMIC
   MetalioEInk4,  // ESP32-S3, GDEM0397T81, CST816S, TCA9555
+  ReterminalE1001,  // Seeed reTerminal E1001: ESP32-S3, UC8179 7.5" 800x480, 3 keys, SD on the display SPI bus
 };
 
 // How the board reports button presses.
@@ -788,6 +797,9 @@ struct BoardProfile {
   // a board with one sets it (EEGO A4).
   I2cFrontlightConfig i2cFrontlight = NO_I2C_FRONTLIGHT;
   HapticConfig haptic = {};
+  // Active-high switch that powers the batteryAdc divider (PIN_UNASSIGNED = always
+  // powered). BatteryMonitor raises it only around a read.
+  int8_t batteryAdcEnable = PIN_UNASSIGNED;
 };
 
 constexpr TouchConfig NO_TOUCH = {TouchController::None,
@@ -1875,6 +1887,51 @@ constexpr BoardProfile ONEPAGE = {
 static_assert(ONEPAGE.displayWidth / 8 * ONEPAGE.displayHeight == 48000,
               "OnePage framebuffer must be 48,000 bytes (800/8 x 480)");
 
+// --- Seeed reTerminal E1001 — ESP32-S3R8, UC8179 + GDEY075T7 7.5" 800x480 -------
+// Pins from schematic v1.2 and Zephyr boards/seeed/reterminal_e1001, verified on
+// hardware (see the port's HARDWARE.md).
+//
+// Display RST also enables the panel's 3.3 V load switch, so RST low powers the
+// panel down. SD shares the display's SCLK/MOSI; GPIO16 switches the card rail.
+//
+// Keys, landscape with the keys on top, all active-low with external pull-ups:
+// left GPIO5 = up (previous), middle GPIO4 = down (next), right GPIO3 = confirm,
+// hold for back, long hold for power (sleep). GPIO3 is the ext1 wake pin.
+//
+// Battery: ADC on GPIO1 behind a 10K/10K divider that GPIO21 switches on.
+constexpr BoardProfile RETERMINAL_E1001 = {
+    Board::ReterminalE1001,
+    "reterminal_e1001",
+    InputStyle::DigitalConfirmBackHold,
+    DisplayController::UC8179,
+    800,
+    480,
+    {7, 9, 10, 11, 12, 13, PIN_UNASSIGNED},
+    10000000,  // displaySpiHz
+    {PIN_UNASSIGNED, 8, PIN_UNASSIGNED, 14, 16, false, 0},  // SD: MISO 8, CS 14, rail EN 16; 40 MHz
+    {3, 3, PIN_UNASSIGNED, PIN_UNASSIGNED, 5, 4, 3, false},
+    1,               // batteryAdc
+    PIN_UNASSIGNED,  // batteryChargeStatus: SY6974B status is I2C-only
+    2.0f,
+    PIN_UNASSIGNED,  // usbDetect: none
+    NO_TOUCH,
+    NO_FRONTLIGHT,
+    NO_AUDIO,
+    NO_LEDS,
+    NO_FLIP,  // the UC8179 config sets scan direction
+    NO_SDMMC,
+    NO_GAUGE,
+    NO_MIC,
+    NO_SENSORS,
+    1.0f,
+    {},
+    0,
+    {0, 0, 0, 0},  // viewableInsets: the full panel is visible
+    false,
+    NO_I2C_FRONTLIGHT,
+    {},
+    21};  // batteryAdcEnable
+
 // Largest framebuffer (bytes) over the devices compiled into this build, derived
 // from the profiles above. The display facade sizes its static framebuffer to
 // this so one binary holds whichever panel is runtime-selected; a single-device
@@ -1900,12 +1957,15 @@ constexpr uint32_t MAX_FRAMEBUFFER_BYTES = cmax(
                    cmax(cmax(FREEINK_DEVICE_EEGO_A4 ? panelBytes(EEGO_A4) : 0u,
                              FREEINK_DEVICE_ONEPAGE ? panelBytes(ONEPAGE) : 0u),
                         cmax(FREEINK_DEVICE_WS397 ? panelBytes(WS_EPAPER_397) : 0u,
-                             FREEINK_DEVICE_METALIO_EINK4 ? panelBytes(METALIO_EINK4) : 0u))))));
+                             cmax(FREEINK_DEVICE_METALIO_EINK4 ? panelBytes(METALIO_EINK4) : 0u,
+                                  FREEINK_DEVICE_RETERMINAL_E1001 ? panelBytes(RETERMINAL_E1001) : 0u)))))));
 
 // Compile-time default device — the profile ACTIVE starts as. With a single
 // device in the build this is the only device; with several same-MCU devices it
 // is the boot default until the consumer calls selectDevice().
-#if FREEINK_DEVICE_METALIO_EINK4
+#if FREEINK_DEVICE_RETERMINAL_E1001
+constexpr BoardProfile DEFAULT_DEVICE = RETERMINAL_E1001;
+#elif FREEINK_DEVICE_METALIO_EINK4
 constexpr BoardProfile DEFAULT_DEVICE = METALIO_EINK4;
 #elif FREEINK_DEVICE_WS397
 constexpr BoardProfile DEFAULT_DEVICE = WS_EPAPER_397;
@@ -2042,6 +2102,11 @@ inline bool selectDevice(Board which) {
       ACTIVE = WS_EPAPER_397;
       break;
 #endif
+#if FREEINK_DEVICE_RETERMINAL_E1001
+    case Board::ReterminalE1001:
+      ACTIVE = RETERMINAL_E1001;
+      break;
+#endif
     default:
       return false;
   }
@@ -2066,6 +2131,7 @@ inline bool isEegoA4() { return ACTIVE.board == Board::EegoA4; }
 inline bool isMetalioEInk4() { return ACTIVE.board == Board::MetalioEInk4; }
 inline bool isOnePage() { return ACTIVE.board == Board::OnePage; }
 inline bool isWsEpaper397() { return ACTIVE.board == Board::WsEpaper397; }
+inline bool isReterminalE1001() { return ACTIVE.board == Board::ReterminalE1001; }
 inline bool hasTouch() { return ACTIVE.touch.controller != TouchController::None; }
 inline bool hasHomeKey() { return ACTIVE.touch.hasHomeKey; }
 inline bool hasPwmFrontlight() { return ACTIVE.frontlight.gpio != PIN_UNASSIGNED || ACTIVE.frontlight.viaPm1Pwm; }
