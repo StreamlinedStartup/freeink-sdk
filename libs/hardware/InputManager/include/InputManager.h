@@ -453,6 +453,8 @@ class InputManager {
   static constexpr int ADC_NO_BUTTON = 3900;
   static constexpr unsigned long DEBOUNCE_DELAY = 5;
   static constexpr unsigned long CONFIRM_BACK_HOLD_MS = 650;
+  // reTerminal E1001: the confirm key is also the power key; holding it this long sleeps.
+  static constexpr unsigned long CONFIRM_BACK_SLEEP_HOLD_MS = 3000;
   static constexpr unsigned long CONFIRM_POWER_HOLD_MS = 400;
   static constexpr unsigned long TWO_BUTTON_HOLD_MS = 650;
 

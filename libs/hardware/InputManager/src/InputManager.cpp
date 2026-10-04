@@ -406,6 +406,10 @@ void InputManager::updateConfirmBackHold(const unsigned long currentTime) {
     confirmBackLongPressActive = true;
     nextState |= (1 << BTN_BACK);
   }
+  if (pressed && BoardConfig::isReterminalE1001() &&
+      currentTime - confirmBackPressStart >= CONFIRM_BACK_SLEEP_HOLD_MS) {
+    nextState |= (1 << BTN_POWER);
+  }
 
   if (!pressed && confirmBackPhysicalPressed) {
     confirmBackPhysicalPressed = false;
@@ -418,6 +422,11 @@ void InputManager::updateConfirmBackHold(const unsigned long currentTime) {
   }
 
   applyStateChange(nextState, currentTime);
+
+  // Power hold time counts from the physical press, as in updateConfirmPowerHold().
+  if (pressedEvents & (1 << BTN_POWER)) {
+    powerButtonPressStart = confirmBackPressStart;
+  }
 
   if (emitConfirmClick) {
     pressedEvents |= (1 << BTN_CONFIRM);
