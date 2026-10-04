@@ -103,6 +103,30 @@ const Uc8179Config& uc8179DefaultConfig() {
   return cfg;
 }
 
+// Seeed reTerminal E1001 (GDEY075T7 glass, 800x480 gates). Booster, power save
+// and the forced temperatures match GxEPD2_750_GDEY075T7: TSSET 0x5A selects the
+// fast full waveform, 0x6E the fast partial one. PSR clears UD because
+// streamPlane() writes rows bottom-up; with SHL this puts framebuffer row 0 at
+// the top edge in landscape, keys up.
+const Uc8179Config& uc8179ReterminalE1001Config() {
+  static const Uc8179Config cfg = {
+      0x37,                      // psr0: KW, UD=0, SHL=1; refresh writes 0x17 (OTP)
+      0x0A,                      // psr1
+      0x20,                      // pfs
+      {0x17, 0x17, 0x28, 0x17},  // btst
+      0x00,                      // gateScan: not written; 0x02 doubles each row on this glass
+      0x02,                      // ccset: TSFIX
+      0x5A,                      // tsset: fast full
+      0x6E,                      // tssetFast: fast partial
+      0x29,                      // cdiActive
+      0xA9,                      // cdiIdle
+      480,                       // tresHeight: no hidden gates
+      0x22,                      // powerSave
+      false,                     // grayscale
+  };
+  return cfg;
+}
+
 // Visible geometry comes from the active BoardProfile (X4 / X4 Pro, 800x480).
 Uc8179Driver::Uc8179Driver(const Uc8179Config& cfg)
     : _cfg(cfg),
@@ -152,8 +176,10 @@ void Uc8179Driver::initController(EpdBus& bus) {
   bus.data(_cfg.btst[2]);
   bus.data(_cfg.btst[3]);
 
-  bus.cmd(CMD_GATE_SCAN);
-  bus.data(_cfg.gateScan);
+  if (_cfg.gateScan != 0) {
+    bus.cmd(CMD_GATE_SCAN);
+    bus.data(_cfg.gateScan);
+  }
 
   // GxEPD2 added this UC8179 setting specifically for dithered-bitmap
   // stability. Keep it configurable because the X4 Pro uses different glass
@@ -428,8 +454,10 @@ void Uc8179Driver::startBwRefresh(EpdBus& bus, bool fast) {
     // waveform runs at the full frame count (same duration + garbled).
     bus.cmd(CMD_PFS);
     bus.data(_cfg.pfs);  // 0x03 <- 0x20
-    bus.cmd(CMD_GATE_SCAN);
-    bus.data(_cfg.gateScan);  // 0xE1 <- 0x02
+    if (_cfg.gateScan != 0) {
+      bus.cmd(CMD_GATE_SCAN);
+      bus.data(_cfg.gateScan);  // 0xE1 <- 0x02
+    }
   }
 
   if (!_isScreenOn) {
@@ -530,8 +558,10 @@ void Uc8179Driver::runGrayscalePrecondition(EpdBus& bus) {
   bus.data(_cfg.psr1);
   bus.cmd(CMD_PFS);
   bus.data(_cfg.pfs);
-  bus.cmd(CMD_GATE_SCAN);
-  bus.data(_cfg.gateScan);
+  if (_cfg.gateScan != 0) {
+    bus.cmd(CMD_GATE_SCAN);
+    bus.data(_cfg.gateScan);
+  }
   bus.cmd(CMD_VCOM_DATA_INTERVAL);
   bus.data(_cfg.cdiActive);  // Factory.bin FUN_4214eab4 uses 0x29 for every pre-pass
   bus.data(CDI_INTERVAL);
@@ -570,6 +600,11 @@ void Uc8179Driver::preconditionGrayscale(EpdBus& bus, uint16_t x, uint16_t y, ui
 }
 
 void Uc8179Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode mode, RefreshMode fallback, bool turnOff) {
+  // Without grayscale the B/W base is the whole page.
+  if (!_cfg.grayscale) {
+    display(bus, fb, nullptr, fallback, turnOff);
+    return;
+  }
   if (mode == GrayscaleMode::Direct) {
     configureDirectGrayscale(bus);
     _absoluteInput = true;
@@ -598,7 +633,7 @@ void Uc8179Driver::beginGrayscale(EpdBus& bus, const uint8_t* fb, GrayscaleMode 
 }
 
 void Uc8179Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
-  if (!lsb) return;
+  if (!lsb || !_cfg.grayscale) return;
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
     streamPlane(bus, CMD_DTM1, lsb, false);
@@ -631,7 +666,7 @@ void Uc8179Driver::copyGrayscaleLsb(EpdBus& bus, const uint8_t* lsb) {
 }
 
 void Uc8179Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
-  if (!msb) return;
+  if (!msb || !_cfg.grayscale) return;
   if (_absoluteInput) {
     bus.waitBusy(" absolute plane");
     streamPlane(bus, CMD_DTM2, msb, false);
@@ -659,6 +694,9 @@ void Uc8179Driver::copyGrayscaleMsb(EpdBus& bus, const uint8_t* msb) {
 
 void Uc8179Driver::displayGray(EpdBus& bus, const uint8_t* fb, bool turnOff, const unsigned char* lut,
                                bool factoryMode) {
+  // Hosts may run the gray passes without asking for capabilities; the page
+  // then stays at its B/W base.
+  if (!_cfg.grayscale) return;
   // fb = the reader's current frame; used to re-seed the B/W baseline below.
   (void)lut;          // waveform comes from the built-in gray LUT set (kGrayLuts)
 
@@ -799,6 +837,8 @@ void Uc8179Driver::cleanupGrayscaleBuffers(EpdBus& bus, const uint8_t* bw) {
 #ifdef FREEINK_UC8179_CONFIG
 const Uc8179Config& FREEINK_UC8179_CONFIG();
 static const Uc8179Config& uc8179ActiveConfig() { return FREEINK_UC8179_CONFIG(); }
+#elif FREEINK_DEVICE_RETERMINAL_E1001
+static const Uc8179Config& uc8179ActiveConfig() { return uc8179ReterminalE1001Config(); }
 #else
 static const Uc8179Config& uc8179ActiveConfig() { return uc8179DefaultConfig(); }
 #endif

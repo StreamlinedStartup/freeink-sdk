@@ -30,7 +30,7 @@ struct Uc8179Config {
   uint8_t pfs;
   // Booster soft-start (cmd 0x06), 4 bytes.
   uint8_t btst[4];
-  // Gate-scan selection (cmd 0xE1).
+  // Gate-scan selection (cmd 0xE1). 0 skips the write.
   uint8_t gateScan;
   // CCSET cascade/output enable (cmd 0xE0).
   uint8_t ccset;
@@ -52,9 +52,13 @@ struct Uc8179Config {
   // by GxEPD2 to prevent artifacts with dithered images. Appended to preserve
   // the field order of existing aggregate board configurations.
   uint8_t powerSave;
+  // Run the 4-level grayscale (AA) path. Its waveforms are tuned for the
+  // X4 Pro glass; boards with other glass turn it off and stay B/W.
+  bool grayscale = true;
 };
 
 const Uc8179Config& uc8179DefaultConfig();
+const Uc8179Config& uc8179ReterminalE1001Config();
 
 class Uc8179Driver : public PanelDriver {
  public:
@@ -86,6 +90,8 @@ class Uc8179Driver : public PanelDriver {
                              uint16_t h) override;
   GrayscaleCapabilities grayscaleCapabilities(
       GrayscaleMode mode = GrayscaleMode::Overlay) const override {
+    if (!_cfg.grayscale)
+      return {};
     if (mode == GrayscaleMode::Absolute || mode == GrayscaleMode::Direct)
       return {GrayscaleEncoding::AbsolutePlanes,
               mode == GrayscaleMode::Direct ? GrayscaleBase::Combined : GrayscaleBase::Separate,
